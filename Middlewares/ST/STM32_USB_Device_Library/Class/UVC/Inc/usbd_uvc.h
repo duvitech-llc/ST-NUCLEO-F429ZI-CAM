@@ -275,8 +275,8 @@ typedef struct  _VideoControl{
 #define WIDTH                                         (unsigned int)640
 #define HEIGHT                                        (unsigned int)480
 #define MIN_FPS                                       15
-#define CAM_FPS                                       24
-#define MAX_FPS                                       30
+#define CAM_FPS                                       15
+#define MAX_FPS                                       15
 #define VIDEO_PACKET_SIZE                             (unsigned int)(1022)//128+130
 #define MIN_BIT_RATE                                  (unsigned long)(0x7CE000)//16 bit
 #define MAX_BIT_RATE                                  (unsigned long)(0x3E80000)
