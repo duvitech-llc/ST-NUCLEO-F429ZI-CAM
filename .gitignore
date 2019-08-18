@@ -1,0 +1,8 @@
+/Debug/
+/MDK-ARM/ST-NUCLEO-F429ZI-CAM
+/MDK-ARM/DebugConfig
+/MDK-ARM/RTE
+/MDK-ARM/*.uvguix
+/MDK-ARM/*.uvoptx
+/MDK-ARM/*.bin
+/MDK-ARM/*.hex
