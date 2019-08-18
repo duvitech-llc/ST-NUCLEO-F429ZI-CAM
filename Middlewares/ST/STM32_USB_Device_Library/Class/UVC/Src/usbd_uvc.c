@@ -51,6 +51,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "usbd_uvc.h"
 #include "usbd_ctlreq.h"
+#include "test_image.h"
 
 
 /** @addtogroup STM32_USB_DEVICE_LIBRARY
@@ -126,6 +127,7 @@ static void UVC_REQ_GetCurrent(USBD_HandleTypeDef *pdev, USBD_SetupReqTypedef *r
 
 static void UVC_REQ_SetCurrent(USBD_HandleTypeDef *pdev, USBD_SetupReqTypedef *req);
 
+	
 /**
   * @}
   */
@@ -423,6 +425,8 @@ static void DumpHex(const void* data, size_t size) {
 
 static uint32_t  usbd_video_AltSet = 0;//number of current interface alternative setting
 
+uint8_t play_status = 0;
+
 /**
   * @}
   */
@@ -440,7 +444,8 @@ static uint32_t  usbd_video_AltSet = 0;//number of current interface alternative
   */
 static uint8_t  USBD_UVC_Init (USBD_HandleTypeDef *pdev, uint8_t cfgidx)
 {
-	printf("%s\r\n", __func__);
+	printf("%s\r\n", __func__);	
+	printf("TEST IMAGE Len: %d\r\n", sizeof(_acTEST_IMAGE));
 	
 #ifndef VIDEO_USES_ISOC_EP		
   /* Open EP IN */
@@ -569,12 +574,13 @@ static uint8_t  USBD_UVC_Setup (USBD_HandleTypeDef *pdev,
 					printf("EP Enabled\r\n");
 					// clear the circular buffer					
 					//camera_desired_state = 1;
-        	//play_status = 1;
+        	play_status = 1;
         } else {
 					printf("EP Disabled\r\n");
 					//camera_desired_state = 0;
         	USBD_LL_FlushEP(pdev, USB_ENDPOINT_IN(USB_UVC_ENDPOINT));
-        	//play_status = 0;
+        	play_status = 0;
+					HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);  // high signal led OFF  
         }
       }
       else
@@ -589,6 +595,13 @@ static uint8_t  USBD_UVC_Setup (USBD_HandleTypeDef *pdev,
   return USBD_OK;
 }
 
+__IO uint8_t header[2] = {2,0};//length + data
+__IO uint8_t packet[VIDEO_PACKET_SIZE];
+__IO uint8_t *QspiAddr = NULL;
+__IO uint8_t *CurrentByteAddr = NULL;
+__IO uint8_t *NextByteAddr = NULL;
+__IO uint8_t tx_enable_flag;
+__IO uint32_t last;
 
 /**
   * @brief  USBD_UVC_DataIn
@@ -600,8 +613,61 @@ static uint8_t  USBD_UVC_Setup (USBD_HandleTypeDef *pdev,
 static uint8_t  USBD_UVC_DataIn (USBD_HandleTypeDef *pdev,
                               uint8_t epnum)
 {
-	printf("%s\r\n", __func__);
-  /* Only OUT data are processed */
+	// printf("%s\r\n", __func__);
+	HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);  // high signal led ON  
+		
+	uint32_t t = HAL_GetTick();
+  uint16_t i;  
+  uint16_t packet_size = 0;
+	
+	USBD_LL_FlushEP(pdev, USB_ENDPOINT_IN(USB_UVC_ENDPOINT));
+	
+	if (play_status == 2)
+	{
+		if (tx_enable_flag == 0)
+		{		
+			tx_enable_flag = 1;
+			// check if we need to loop to beginning
+			if(QspiAddr == NULL || *(uint16_t*)QspiAddr == 0xd8ff){
+				QspiAddr = (__IO uint8_t *)(_acTEST_IMAGE);
+			}
+			//printf("SOF\r\n");				
+			//start of new frame
+			header[1]^= 1;//toggle bit0 every new frame
+		}
+
+		packet[0] = header[0];
+		packet[1] = header[1];
+		packet_size += 2;
+
+		for (i=2;i<VIDEO_PACKET_SIZE;i++)
+		{
+			if ((*QspiAddr == 0xFF) && (*(QspiAddr + 1) == 0xD9))
+			{
+				// frame complete
+				//printf("EOF\r\n");
+				packet[i] = *QspiAddr++;
+				packet[i+1] = *QspiAddr++;		
+				packet_size+=2;
+				tx_enable_flag = 0;
+				QspiAddr = NULL;
+				break;
+			}
+			
+			packet[i] = *QspiAddr++;			
+			packet_size++;
+		}
+
+		// send packet
+		// DumpHex((uint8_t*)&packet, packet_size);
+		if(USBD_LL_Transmit(pdev,USB_ENDPOINT_IN(USB_UVC_ENDPOINT), (uint8_t*)&packet, (uint32_t)packet_size) == USBD_FAIL){
+			Error_Handler();
+		}
+	}else{
+		QspiAddr = (__IO uint8_t *)(_acTEST_IMAGE);
+	}
+	
+	HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);  // high signal led OFF  
   return USBD_OK;
 }
 
@@ -640,7 +706,15 @@ static uint8_t  USBD_UVC_EP0_TxReady (USBD_HandleTypeDef *pdev)
   */
 static uint8_t  USBD_UVC_SOF (USBD_HandleTypeDef *pdev)
 {
-	//printf("%s\r\n", __func__);
+	//printf("%s\r\n", __func__);  
+	if (play_status == 1)
+  {
+		uint16_t hdr = 0x0002;
+	  USBD_LL_FlushEP(pdev, USB_ENDPOINT_IN(USB_UVC_ENDPOINT));
+	  USBD_LL_Transmit(pdev, USB_ENDPOINT_IN(USB_UVC_ENDPOINT), (uint8_t*)&hdr, 2);//header
+	  play_status = 2;
+		tx_enable_flag = 0;		
+  }
   return USBD_OK;
 }
 
